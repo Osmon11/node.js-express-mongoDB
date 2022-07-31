@@ -1,0 +1,39 @@
+image: docker:stable
+
+services:
+  - docker:dind
+
+stages:
+  - build
+  - deploy
+
+build_docker_image:
+  stage: build
+  before_script:
+    - docker login -u $CI_REGISTRY_USER -p $CI_REGISTRY_PASSWORD $CI_REGISTRY
+  script:
+    - docker build -t $CI_REGISTRY_IMAGE:$CI_PIPELINE_ID .
+    - docker push $CI_REGISTRY_IMAGE:$CI_PIPELINE_ID
+    - export CI_COMMIT_SHORT_SHA=$CI_COMMIT_SHORT_SHA 
+    - env |grep CI_COMMIT_SHORT_SHA
+
+deploy:
+  stage: deploy
+  before_script:
+    - 'which ssh-agent || ( apt-get update -y && apt-get install openssh-client -y )'
+    - eval $(ssh-agent -s)
+    - mkdir -p ~/.ssh
+    - chmod 700 ~/.ssh
+    - touch ~/.ssh/id_rsa
+    - '[[ -f /.dockerenv ]] && echo -e "Host *\n\tStrictHostKeyChecking no\n\n" >> ~/.ssh/config'
+    - echo "$SSH_PRIVATE_KEY" > ~/.ssh/id_rsa
+    - cat ~/.ssh/id_rsa
+    - chmod 600 ~/.ssh/id_rsa
+  script:
+    - ssh -i ~/.ssh/id_rsa -p 43816 gitlab-runner@195.38.164.4 "docker ps"
+    - ssh -i ~/.ssh/id_rsa -p 43816 gitlab-runner@195.38.164.4 "docker login registry.gitlab.com -u chonorov_askat -p $GITLAB_CI_TOKEN"
+    - ssh -i ~/.ssh/id_rsa -p 43816 gitlab-runner@195.38.164.4 "docker pull $CI_REGISTRY_IMAGE:$CI_PIPELINE_ID"
+    - ssh -i ~/.ssh/id_rsa -p 43816 gitlab-runner@195.38.164.4 "TAG=$CI_PIPELINE_ID docker-compose -f /opt/docker/api.amanatadvisory/docker-compose.yml up -d"
+
+  only:
+    - main
